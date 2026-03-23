@@ -926,10 +926,6 @@ async function ensureDir(dirPath) {
   await fs.mkdir(dirPath, { recursive: true });
 }
 
-async function ensureDirectoryExists(dirPath) {
-  await ensureDir(dirPath);
-}
-
 async function listFilesRecursive(rootDir) {
   const out = [];
   async function walk(dir) {
@@ -1745,7 +1741,7 @@ async function performSync(config) {
     });
     syncInProgress = false;
     activeTransfers.clear();
-    sendLiveUpdate({ pendingOps });
+    sendLiveUpdate({ pendingOps: Array.isArray(result.pendingOps) ? result.pendingOps : pendingOps });
     updateProgressBar(-1, 0);
     const summaryParts = [];
     const uploadedCount = Array.isArray(result.uploaded) ? result.uploaded.length : 0;
@@ -1779,7 +1775,7 @@ async function performSync(config) {
   } catch (error) {
     syncInProgress = false;
     activeTransfers.clear();
-    sendLiveUpdate({ pendingOps });
+    sendLiveUpdate({ pendingOps: Array.isArray(result.pendingOps) ? result.pendingOps : pendingOps });
     updateProgressBar(-1, 0);
     setStatus('Sync failed');
     addActivity({ level: 'error', message: `Sync failed: ${error.message}` });

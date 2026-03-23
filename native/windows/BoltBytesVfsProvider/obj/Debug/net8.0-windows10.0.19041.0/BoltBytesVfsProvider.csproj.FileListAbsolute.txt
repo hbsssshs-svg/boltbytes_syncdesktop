@@ -26,6 +26,7 @@ C:\dev\boltbytes_syncdesktop\native\windows\BoltBytesVfsProvider\obj\Debug\net8.
 C:\dev\boltbytes_syncdesktop\native\windows\BoltBytesVfsProvider\obj\Debug\net8.0-windows10.0.19041.0\BoltBytesVfsProvider.AssemblyInfoInputs.cache
 C:\dev\boltbytes_syncdesktop\native\windows\BoltBytesVfsProvider\obj\Debug\net8.0-windows10.0.19041.0\BoltBytesVfsProvider.AssemblyInfo.cs
 C:\dev\boltbytes_syncdesktop\native\windows\BoltBytesVfsProvider\obj\Debug\net8.0-windows10.0.19041.0\BoltBytesVfsProvider.csproj.CoreCompileInputs.cache
+C:\dev\boltbytes_syncdesktop\native\windows\BoltBytesVfsProvider\obj\Debug\net8.0-windows10.0.19041.0\BoltBytesVfsProvider.sourcelink.json
 C:\dev\boltbytes_syncdesktop\native\windows\BoltBytesVfsProvider\obj\Debug\net8.0-windows10.0.19041.0\BoltByte.3477F14E.Up2Date
 C:\dev\boltbytes_syncdesktop\native\windows\BoltBytesVfsProvider\obj\Debug\net8.0-windows10.0.19041.0\BoltBytesVfsProvider.dll
 C:\dev\boltbytes_syncdesktop\native\windows\BoltBytesVfsProvider\obj\Debug\net8.0-windows10.0.19041.0\refint\BoltBytesVfsProvider.dll

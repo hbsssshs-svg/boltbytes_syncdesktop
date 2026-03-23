@@ -1,3 +1,9 @@
+$ErrorActionPreference = 'Stop'
+
+$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$target = Join-Path $repoRoot 'src\main.js'
+
+$js = @'
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const net = require('node:net');
@@ -821,7 +827,7 @@ function getConfigPath() {
 }
 
 function maskSecret(secret) {
-  return secret ? 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢' : '';
+  return secret ? '••••••••' : '';
 }
 
 
@@ -924,10 +930,6 @@ function getCacheRoot() {
 async function ensureDir(dirPath) {
   if (!dirPath) return;
   await fs.mkdir(dirPath, { recursive: true });
-}
-
-async function ensureDirectoryExists(dirPath) {
-  await ensureDir(dirPath);
 }
 
 async function listFilesRecursive(rootDir) {
@@ -1197,7 +1199,7 @@ async function triggerAutoSync(reason = 'Changes detected') {
     addActivity({ level: 'info', message: gate.reason });
     return;
   }
-  addActivity({ level: 'info', message: `${reason} â€” starting automatic sync` });
+  addActivity({ level: 'info', message: `${reason} — starting automatic sync` });
   try {
     await performSync(config);
   } catch (error) {
@@ -1617,7 +1619,7 @@ async function performSync(config) {
   const authenticatedConfig = await ensureAuthenticated(config);
   const suppressUploads = Boolean(authenticatedConfig.lastSyncedRemoteFolderId && authenticatedConfig.lastSyncedRemoteFolderId !== authenticatedConfig.remoteFolderId);
   if (suppressUploads && authenticatedConfig.enableUploadSync) {
-    addActivity({ level: 'warning', message: 'Cloud folder changed since last sync â€” uploads are disabled for this run to prevent copying old local data into the new folder.' });
+    addActivity({ level: 'warning', message: 'Cloud folder changed since last sync — uploads are disabled for this run to prevent copying old local data into the new folder.' });
   }
   const effectiveConfig = { ...authenticatedConfig, suppressUploadsThisRun: suppressUploads };
   const persistedStatePayload = await loadPersistedSyncStates(effectiveConfig);
@@ -1626,7 +1628,7 @@ async function performSync(config) {
 
   syncInProgress = true;
   latestSyncResult = { uploaded: [], downloaded: [], warnings: [], conflicts: [], skipped: [], localCount: 0, remoteCount: 0, completedOperations: 0, totalOperations: 0, live: { uploading: 0, downloading: 0, conflicts: 0 } };
-  setStatus('Syncingâ€¦');
+  setStatus('Syncing…');
   updateProgressBar(0, 1);
   addActivity({ level: 'info', message: 'Sync started' });
   sendLiveUpdate({ pendingOps });
@@ -1745,7 +1747,7 @@ async function performSync(config) {
     });
     syncInProgress = false;
     activeTransfers.clear();
-    sendLiveUpdate({ pendingOps });
+    sendLiveUpdate({ pendingOps: Array.isArray(result.pendingOps) ? result.pendingOps : pendingOps });
     updateProgressBar(-1, 0);
     const summaryParts = [];
     const uploadedCount = Array.isArray(result.uploaded) ? result.uploaded.length : 0;
@@ -1779,7 +1781,7 @@ async function performSync(config) {
   } catch (error) {
     syncInProgress = false;
     activeTransfers.clear();
-    sendLiveUpdate({ pendingOps });
+    sendLiveUpdate({ pendingOps: Array.isArray(result.pendingOps) ? result.pendingOps : pendingOps });
     updateProgressBar(-1, 0);
     setStatus('Sync failed');
     addActivity({ level: 'error', message: `Sync failed: ${error.message}` });
@@ -2358,3 +2360,10 @@ ipcMain.handle('shell:openPath', async (_, targetPath) => {
 });
 
 ;
+
+'@
+
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($target, $js, $utf8NoBom)
+
+Write-Host "Patched $target"

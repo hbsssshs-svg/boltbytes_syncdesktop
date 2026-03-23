@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("BoltBytesVfsProvider")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5c60e8a63a8cd328d4cb2b5c114bb56ea03a98d5")]
 [assembly: System.Reflection.AssemblyProductAttribute("BoltBytesVfsProvider")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BoltBytesVfsProvider")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

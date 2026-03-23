@@ -1,5 +1,6 @@
-const path = require('node:path');
+﻿const path = require('node:path');
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const net = require('node:net');
 const { app, BrowserWindow, ipcMain, dialog, Menu, Tray, nativeImage, shell, screen, Notification } = require('electron');
 
@@ -39,64 +40,60 @@ async function ensureWindowsToastShortcut() {
 const crypto = require('node:crypto');
 
 
-
-// --- Cloud Files (Windows CFAPI) bridge (rebuilt minimal lifecycle) ---
+// --- Cloud Files (Windows CFAPI) bridge (MVP) ---
 const VFS_PROVIDER_ID = '4f6d0c5e-7c2f-4d9b-a7e0-75b9385c00b2';
 let vfsServer = null;
 let vfsProviderProcess = null;
 let vfsProviderStarting = false;
 let vfsActiveConfig = null;
-let vfsProviderConfigKey = '';
 const vfsSockets = new Set();
 
 let vfsProviderState = {
   running: false,
-  starting: false,
   lastError: '',
   lastExitCode: null,
-  lastExitSignal: null,
   lastEventAt: null,
   launchCmd: '',
-  launchArgs: [],
-  pid: null,
-  debugLogPath: '',
 };
 
 let vfsProviderStopRequested = false;
 let vfsProviderStartedAt = 0;
+let vfsProviderRestartAttempts = 0;
+let vfsProviderRestartTimer = null;
 const vfsProviderRecentLogs = [];
 
 function getVfsDebugLogPath() {
   try {
     return path.join(app.getPath('userData'), 'cloud-files-provider-debug.log');
   } catch {
-    return '';
+    return path.join(process.cwd(), 'cloud-files-provider-debug.log');
   }
 }
 
-function appendVfsDebugLog(message, extra = null) {
-  const logPath = getVfsDebugLogPath();
-  vfsProviderState.debugLogPath = logPath;
-
-  const stamp = new Date().toISOString();
-  let line = `${stamp} ${String(message || '').trim()}`;
-  if (extra && typeof extra === 'object') {
-    try {
-      line += ` ${JSON.stringify(extra)}`;
-    } catch {
-      // Best-effort only.
-    }
-  }
-
-  if (!logPath) return;
-
+function appendVfsDebug(event, fields = {}) {
   try {
-    const fsSync = require('node:fs');
+    const payload = {
+      at: new Date().toISOString(),
+      event,
+      appPid: process.pid,
+      ...fields,
+    };
+    const line = `${JSON.stringify(payload)}\n`;
+    const logPath = getVfsDebugLogPath();
     fsSync.mkdirSync(path.dirname(logPath), { recursive: true });
-    fsSync.appendFileSync(logPath, `${line}\n`, 'utf8');
+    fsSync.appendFileSync(logPath, line, 'utf8');
+    vfsProviderState.debugLogPath = logPath;
   } catch {
     // Best-effort only.
   }
+}
+
+function pushVfsDebug(level, event, fields = {}) {
+  appendVfsDebug(event, fields);
+  const details = JSON.stringify(fields);
+  const line = details === '{}' ? `[debug] ${event}` : `[debug] ${event} ${details}`;
+  pushVfsProviderLog(level, line);
+  addActivity({ level, message: `[Cloud Files] ${line}` });
 }
 
 function pushVfsProviderLog(level, text) {
@@ -104,23 +101,20 @@ function pushVfsProviderLog(level, text) {
   if (!line) return;
   const entry = { at: Date.now(), level, line };
   vfsProviderRecentLogs.push(entry);
-  while (vfsProviderRecentLogs.length > 120) vfsProviderRecentLogs.shift();
+  while (vfsProviderRecentLogs.length > 80) vfsProviderRecentLogs.shift();
   vfsProviderState.lastLogLine = line;
   vfsProviderState.lastLogLevel = level;
   vfsProviderState.lastEventAt = Date.now();
-  appendVfsDebugLog(`[provider:${level}] ${line}`);
   publishVfsStatus();
 }
+
 
 function getVfsStatus() {
   return {
     enabled: Boolean(vfsActiveConfig?.virtualFilesEnabled),
     syncRoot: vfsActiveConfig?.virtualFilesFolder || '',
     remoteFolderId: vfsActiveConfig?.remoteFolderId || '',
-    provider: {
-      ...vfsProviderState,
-      recentLogs: vfsProviderRecentLogs.slice(-40),
-    },
+    provider: { ...vfsProviderState },
   };
 }
 
@@ -134,15 +128,6 @@ function getVfsPipeName() {
   const base = app.getPath('userData');
   const suffix = crypto.createHash('sha1').update(base).digest('hex').slice(0, 10);
   return `boltbytes-syncdesktop-vfs-${suffix}`;
-}
-
-function getVfsProviderConfigKey(config) {
-  return JSON.stringify({
-    syncRoot: String(config?.virtualFilesFolder || ''),
-    remoteFolderId: String(config?.remoteFolderId || ''),
-    workspaceId: String(config?.workspaceId ?? 0),
-    pipeName: getVfsPipeName(),
-  });
 }
 
 function frameEncode(obj) {
@@ -226,10 +211,8 @@ async function startVfsServer() {
 
   const pipeName = getVfsPipeName();
   const pipePath = `\\\\.\\pipe\\${pipeName}`;
-  appendVfsDebugLog('[server] starting', { pipeName, pipePath });
 
   vfsServer = net.createServer(socket => {
-    appendVfsDebugLog('[server] client connected');
     vfsSockets.add(socket);
     const decode = createFrameDecoder(async msg => {
       const response = await (async () => {
@@ -240,117 +223,111 @@ async function startVfsServer() {
         }
       })();
       if (!response) return;
-      try {
-        socket.write(frameEncode(response));
-      } catch {
-        // Best-effort only.
-      }
+      try { socket.write(frameEncode(response)); } catch {}
     });
 
     socket.on('data', decode);
-    socket.on('close', () => {
-      vfsSockets.delete(socket);
-      appendVfsDebugLog('[server] client closed');
-    });
-    socket.on('error', err => {
-      vfsSockets.delete(socket);
-      appendVfsDebugLog('[server] client error', { message: String(err?.message || err) });
-    });
+    socket.on('close', () => vfsSockets.delete(socket));
+    socket.on('error', () => vfsSockets.delete(socket));
   });
 
   await new Promise((resolve, reject) => {
     vfsServer.once('error', reject);
-    vfsServer.listen(pipePath, () => {
-      appendVfsDebugLog('[server] listening', { pipeName, pipePath });
-      resolve();
-    });
+    vfsServer.listen(pipePath, resolve);
   });
+
+  pushVfsDebug('info', 'vfs-server-listening', { pipeName, pipePath });
 }
 
 async function stopVfsServer() {
-  if (!vfsServer) return;
-  appendVfsDebugLog('[server] stopping');
+  if (!vfsServer) {
+    pushVfsDebug('info', 'vfs-server-stop-skip-missing');
+    return;
+  }
+  pushVfsDebug('info', 'vfs-server-stopping', { socketCount: vfsSockets.size });
   for (const sock of Array.from(vfsSockets)) {
-    try {
-      sock.destroy();
-    } catch {
-      // Best-effort only.
-    }
+    try { sock.destroy(); } catch {}
   }
   vfsSockets.clear();
   await new Promise(resolve => vfsServer.close(() => resolve()));
   vfsServer = null;
-  appendVfsDebugLog('[server] stopped');
+  pushVfsDebug('info', 'vfs-server-stopped');
 }
 
 async function stopVfsProvider() {
   vfsProviderStopRequested = true;
-  vfsProviderStarting = false;
-  vfsProviderConfigKey = '';
+  vfsProviderRestartAttempts = 0;
+
+  if (vfsProviderRestartTimer) {
+    try { clearTimeout(vfsProviderRestartTimer); } catch {}
+    vfsProviderRestartTimer = null;
+  }
 
   const proc = vfsProviderProcess;
   vfsProviderProcess = null;
 
-  vfsProviderState.starting = false;
   vfsProviderState.running = false;
-  vfsProviderState.pid = null;
+  vfsProviderState.lastExitCode = null;
   vfsProviderState.lastEventAt = Date.now();
   publishVfsStatus();
 
   if (!proc) {
-    appendVfsDebugLog('[provider] stop requested but no process was running');
+    pushVfsDebug('info', 'provider-stop-skip-missing');
     return;
   }
 
-  appendVfsDebugLog('[provider] stop requested', { pid: proc.pid });
+  pushVfsDebug('info', 'provider-stop-requested', {
+    pid: proc.pid || null,
+    spawnfile: proc.spawnfile || '',
+    spawnargs: Array.isArray(proc.spawnargs) ? proc.spawnargs : [],
+  });
 
   await new Promise(resolve => {
-    let settled = false;
+    let done = false;
 
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      try {
-        proc.removeListener('exit', finish);
-        proc.removeListener('close', finish);
-      } catch {
-        // Best-effort only.
-      }
+    const finish = source => {
+      if (done) return;
+      done = true;
+      try { proc.removeListener('exit', onExit); } catch {}
+      try { proc.removeListener('close', onClose); } catch {}
+      pushVfsDebug('info', 'provider-stop-finished', {
+        source,
+        pid: proc.pid || null,
+      });
       resolve();
     };
 
-    proc.once('exit', finish);
-    proc.once('close', finish);
+    const onExit = (code, signal) => finish(`exit:${String(code)}:${String(signal || '')}`);
+    const onClose = code => finish(`close:${String(code)}`);
+
+    proc.once('exit', onExit);
+    proc.once('close', onClose);
 
     try {
       proc.kill();
+      pushVfsDebug('info', 'provider-kill-sent', { pid: proc.pid || null });
     } catch (err) {
-      appendVfsDebugLog('[provider] kill failed', { message: String(err?.message || err) });
-      finish();
+      pushVfsDebug('warning', 'provider-kill-error', {
+        pid: proc.pid || null,
+        error: String(err?.message || err),
+      });
+      finish('kill-error');
       return;
     }
 
-    setTimeout(() => {
-      appendVfsDebugLog('[provider] stop wait timeout elapsed', { pid: proc.pid });
-      finish();
-    }, 5000);
+    setTimeout(() => finish('timeout'), 5000);
   });
 }
 
 function resolveVfsProviderLaunch() {
-  const envPath = String(process.env.BOLTBYTES_VFS_PROVIDER_PATH || '').trim();
+  const envPath = process.env.BOLTBYTES_VFS_PROVIDER_PATH;
   if (envPath) {
-    return {
-      ok: true,
-      strategy: 'env-exe',
-      cmd: envPath,
-      args: [],
-      cwd: path.dirname(envPath),
-    };
+    return { kind: 'env-exe', cmd: envPath, args: [], providerDir: path.dirname(envPath) };
   }
 
   if (!app.isPackaged) {
     const providerDir = path.join(app.getAppPath(), 'native', 'windows', 'BoltBytesVfsProvider');
+    const csproj = path.join(providerDir, 'BoltBytesVfsProvider.csproj');
     const devExe = path.join(
       providerDir,
       'bin',
@@ -359,46 +336,96 @@ function resolveVfsProviderLaunch() {
       'BoltBytesVfsProvider.exe'
     );
 
-    try {
-      const fsSync = require('node:fs');
-      if (fsSync.existsSync(devExe)) {
-        return {
-          ok: true,
-          strategy: 'dev-prebuilt-exe',
-          cmd: devExe,
-          args: [],
-          cwd: path.dirname(devExe),
-        };
-      }
-    } catch {
-      // Best-effort only.
+    if (fsSync.existsSync(devExe)) {
+      return { kind: 'dev-exe', cmd: devExe, args: [], providerDir, csproj, devExe, devExeExists: true };
     }
 
     return {
-      ok: false,
-      strategy: 'missing-dev-exe',
-      cmd: '',
-      args: [],
-      cwd: providerDir,
-      error: `Cloud Files provider exe was not found. Build it first: dotnet build "${path.join(providerDir, 'BoltBytesVfsProvider.csproj')}"`,
+      kind: 'dotnet-no-build',
+      cmd: 'dotnet',
+      args: ['run', '--project', csproj, '--no-build'],
+      providerDir,
+      csproj,
+      devExe,
+      devExeExists: false,
     };
   }
 
   const candidate = path.join(process.resourcesPath || '', 'BoltBytesVfsProvider.exe');
-  return {
-    ok: true,
-    strategy: 'packaged-exe',
-    cmd: candidate,
-    args: [],
-    cwd: path.dirname(candidate),
-  };
+  return { kind: 'packaged-exe', cmd: candidate, args: [], providerDir: path.dirname(candidate) };
 }
 
-async function startVfsProvider(config) {
-  if (vfsProviderProcess || vfsProviderStarting) return;
+async function ensureDirectoryExists(targetPath) {
+  const value = String(targetPath || '').trim();
+  if (!value) return;
+
+  try {
+    const stat = await fs.stat(value);
+    if (stat.isDirectory()) return;
+    throw new Error(`Path exists but is not a directory: ${value}`);
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') throw err;
+  }
+
+  await fs.mkdir(value, { recursive: true });
+}
+
+async function configureVfsInfrastructure(config) {
+  if (process.platform !== 'win32') return;
+
+  const enabled = Boolean(config?.virtualFilesEnabled);
+  pushVfsDebug('info', 'configure-vfs-called', {
+    enabled,
+    hasVirtualFilesFolder: Boolean(config?.virtualFilesFolder),
+    hasRemoteFolderId: Boolean(config?.remoteFolderId),
+    workspaceId: Number(config?.workspaceId ?? 0),
+  });
+
+  if (!enabled) {
+    vfsActiveConfig = null;
+    await stopVfsProvider();
+    await stopVfsServer();
+    pushVfsDebug('info', 'configure-vfs-disabled');
+    return;
+  }
+
+  if (!config?.virtualFilesFolder) {
+    vfsProviderState.running = false;
+    vfsProviderState.lastError = 'Cloud Files is enabled but no Cloud Files folder is selected.';
+    vfsProviderState.lastEventAt = Date.now();
+    publishVfsStatus();
+    addActivity({ level: 'warning', message: 'Cloud Files is enabled but no Cloud Files folder is selected.' });
+    pushVfsDebug('warning', 'configure-vfs-missing-folder');
+    return;
+  }
+
+  if (!config?.remoteFolderId) {
+    vfsProviderState.running = false;
+    vfsProviderState.lastError = 'Cloud Files needs a cloud folder selection first.';
+    vfsProviderState.lastEventAt = Date.now();
+    publishVfsStatus();
+    addActivity({ level: 'warning', message: 'Cloud Files needs a cloud folder selection first.' });
+    pushVfsDebug('warning', 'configure-vfs-missing-remote-folder');
+    return;
+  }
+
+  await ensureDirectoryExists(config.virtualFilesFolder);
+
+  vfsActiveConfig = { ...defaultConfig, ...config };
+  await startVfsServer();
+
+  if (vfsProviderProcess || vfsProviderStarting) {
+    pushVfsDebug('info', 'provider-start-skipped-already-active', {
+      hasProcess: Boolean(vfsProviderProcess),
+      pid: vfsProviderProcess?.pid || null,
+      starting: Boolean(vfsProviderStarting),
+    });
+    return;
+  }
 
   const pipeName = getVfsPipeName();
   const launch = resolveVfsProviderLaunch();
+  const isDotnetLaunch = launch.kind === 'dotnet-no-build' || String(launch.cmd || '').toLowerCase() === 'dotnet';
   const providerArgs = [
     '--syncRoot', config.virtualFilesFolder,
     '--pipeName', pipeName,
@@ -407,212 +434,194 @@ async function startVfsProvider(config) {
     '--providerId', VFS_PROVIDER_ID,
     '--providerName', APP_DISPLAY_NAME,
   ];
+  const args = isDotnetLaunch
+    ? [...(launch.args || []), '--', ...providerArgs]
+    : [...(launch.args || []), ...providerArgs];
 
   vfsProviderState.launchCmd = String(launch.cmd || '');
-  vfsProviderState.launchArgs = providerArgs.slice();
   vfsProviderState.lastError = '';
   vfsProviderState.lastExitCode = null;
-  vfsProviderState.lastExitSignal = null;
   vfsProviderState.lastEventAt = Date.now();
-  vfsProviderState.debugLogPath = getVfsDebugLogPath();
   publishVfsStatus();
 
-  if (!launch.ok) {
-    vfsProviderState.running = false;
-    vfsProviderState.starting = false;
-    vfsProviderState.lastError = launch.error || 'Cloud Files provider launch is not available.';
-    vfsProviderState.lastEventAt = Date.now();
-    addActivity({ level: 'warning', message: `[Cloud Files] ${vfsProviderState.lastError}` });
-    appendVfsDebugLog('[provider] launch unavailable', { launch, providerArgs });
-    publishVfsStatus();
-    return;
-  }
-
-  appendVfsDebugLog('[provider] launching', {
-    strategy: launch.strategy,
-    cmd: launch.cmd,
-    cwd: launch.cwd,
-    args: providerArgs,
+  pushVfsDebug('info', 'provider-launch-resolved', {
+    kind: launch.kind || 'unknown',
+    cmd: launch.cmd || '',
+    args,
+    providerDir: launch.providerDir || '',
+    csproj: launch.csproj || '',
+    devExe: launch.devExe || '',
+    devExeExists: Boolean(launch.devExeExists),
     pipeName,
+    syncRoot: config.virtualFilesFolder,
+    remoteFolderId: String(config.remoteFolderId),
+    workspaceId: String(config.workspaceId ?? 0),
   });
 
   try {
-    const { spawn } = require('node:child_process');
     vfsProviderStarting = true;
     vfsProviderStopRequested = false;
     vfsProviderStartedAt = Date.now();
-    vfsProviderState.starting = true;
-    publishVfsStatus();
 
-    const child = spawn(launch.cmd, providerArgs, {
-      cwd: launch.cwd,
+    if (vfsProviderRestartTimer) {
+      try { clearTimeout(vfsProviderRestartTimer); } catch {}
+      vfsProviderRestartTimer = null;
+    }
+
+    const spawnOptions = {
+      cwd: launch.providerDir || undefined,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+    };
+
+    vfsProviderProcess = require('node:child_process').spawn(launch.cmd, args, spawnOptions);
+
+    pushVfsDebug('info', 'provider-spawned', {
+      pid: vfsProviderProcess.pid || null,
+      spawnfile: vfsProviderProcess.spawnfile || launch.cmd || '',
+      spawnargs: Array.isArray(vfsProviderProcess.spawnargs) ? vfsProviderProcess.spawnargs : [],
+      cwd: spawnOptions.cwd || '',
     });
 
-    vfsProviderProcess = child;
-    vfsProviderStarting = false;
-    vfsProviderState.starting = false;
     vfsProviderState.running = true;
-    vfsProviderState.pid = child.pid ?? null;
     vfsProviderState.lastEventAt = Date.now();
     publishVfsStatus();
 
-    appendVfsDebugLog('[provider] spawned', {
-      pid: child.pid ?? null,
-      spawnfile: child.spawnfile || launch.cmd,
-      spawnargs: child.spawnargs || providerArgs,
+    vfsProviderProcess.on('spawn', () => {
+      vfsProviderStarting = false;
+      pushVfsDebug('info', 'provider-spawn-event', {
+        pid: vfsProviderProcess?.pid || null,
+      });
     });
 
-    child.stdout?.on('data', buf => {
+    vfsProviderProcess.stdout?.on('data', buf => {
       const lines = String(buf).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
       for (const line of lines) {
         addActivity({ level: 'info', message: `[Cloud Files] ${line}` });
         pushVfsProviderLog('info', line);
+        appendVfsDebug('provider-stdout', { line });
       }
     });
 
-    child.stderr?.on('data', buf => {
+    vfsProviderProcess.stderr?.on('data', buf => {
       const lines = String(buf).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
       for (const line of lines) {
         addActivity({ level: 'warning', message: `[Cloud Files] ${line}` });
         pushVfsProviderLog('warning', line);
+        appendVfsDebug('provider-stderr', { line });
       }
     });
 
-    child.on('error', err => {
+    vfsProviderProcess.on('error', err => {
       const msg = String(err?.message || err);
-      appendVfsDebugLog('[provider] process error', { message: msg, pid: child.pid ?? null });
-      addActivity({ level: 'warning', message: `[Cloud Files] Provider error: ${msg}` });
+      const code = String(err?.code || '');
+      let friendly = msg;
+      if (code === 'ENOENT' && String(vfsProviderState.launchCmd).toLowerCase() === 'dotnet') {
+        friendly = '.NET SDK was not found. Install .NET 8 SDK (for development), or build BoltBytesVfsProvider.exe and set BOLTBYTES_VFS_PROVIDER_PATH.';
+      }
 
-      if (vfsProviderProcess === child) vfsProviderProcess = null;
-      vfsProviderStarting = false;
-      vfsProviderState.starting = false;
+      pushVfsDebug('warning', 'provider-error', {
+        pid: vfsProviderProcess?.pid || null,
+        code,
+        error: friendly,
+      });
+
+      addActivity({ level: 'warning', message: `[Cloud Files] Provider error: ${friendly}` });
       vfsProviderState.running = false;
-      vfsProviderState.pid = null;
-      vfsProviderState.lastError = msg;
+      vfsProviderState.lastError = friendly;
       vfsProviderState.lastExitCode = null;
       vfsProviderState.lastEventAt = Date.now();
       publishVfsStatus();
+      vfsProviderProcess = null;
+      vfsProviderStarting = false;
     });
 
-    child.on('close', (code, signal) => {
-      appendVfsDebugLog('[provider] close', {
-        pid: child.pid ?? null,
-        code: code ?? null,
+    vfsProviderProcess.on('close', (code, signal) => {
+      pushVfsDebug('info', 'provider-close', {
+        pid: vfsProviderProcess?.pid || null,
+        code: code === null || typeof code === 'undefined' ? null : code,
         signal: signal || null,
       });
     });
 
-    child.on('exit', (code, signal) => {
-      const requested = Boolean(vfsProviderStopRequested);
-      const runtimeMs = vfsProviderStartedAt ? (Date.now() - vfsProviderStartedAt) : 0;
+    vfsProviderProcess.on('exit', (code, signal) => {
       const codeLabel = code === null || typeof code === 'undefined' ? 'unknown' : String(code);
       const signalLabel = signal ? String(signal) : '';
-      const abnormalExit = !requested && (Boolean(signal) || (typeof code === 'number' && code !== 0));
+      const runtimeMs = vfsProviderStartedAt ? (Date.now() - vfsProviderStartedAt) : 0;
+      const requested = Boolean(vfsProviderStopRequested);
+      const details = requested
+        ? 'requested'
+        : `code ${codeLabel}${signalLabel ? `, signal ${signalLabel}` : ''}`;
 
-      appendVfsDebugLog('[provider] exit', {
-        pid: child.pid ?? null,
-        requested,
-        code: code ?? null,
+      pushVfsDebug('info', 'provider-exit', {
+        pid: vfsProviderProcess?.pid || null,
+        code: code === null || typeof code === 'undefined' ? null : code,
         signal: signal || null,
+        requested,
         runtimeMs,
-        abnormalExit,
+        lastError: vfsProviderState.lastError || '',
+        lastLogLine: vfsProviderState.lastLogLine || '',
       });
 
-      addActivity({
-        level: abnormalExit ? 'warning' : 'info',
-        message: `[Cloud Files] Provider stopped (${requested ? 'requested' : `code ${codeLabel}${signalLabel ? `, signal ${signalLabel}` : ''}`})`,
-      });
+      addActivity({ level: 'warning', message: `[Cloud Files] Provider stopped (${details})` });
 
-      if (vfsProviderProcess === child) vfsProviderProcess = null;
-      vfsProviderStarting = false;
-      vfsProviderState.starting = false;
       vfsProviderState.running = false;
-      vfsProviderState.pid = null;
-      vfsProviderState.lastExitCode = code ?? null;
+      vfsProviderState.lastExitCode = (code === null || typeof code === 'undefined') ? null : code;
       vfsProviderState.lastExitSignal = signalLabel || null;
       vfsProviderState.lastEventAt = Date.now();
 
-      if (abnormalExit) {
-        vfsProviderState.lastError = vfsProviderState.lastLogLine || `Provider exited with code ${codeLabel}${signalLabel ? ` (${signalLabel})` : ''}`;
+      if (!requested && codeLabel !== '0') {
+        vfsProviderState.lastError = vfsProviderState.lastError || (vfsProviderState.lastLogLine || 'Provider exited unexpectedly.');
       }
 
       publishVfsStatus();
+      vfsProviderProcess = null;
+      vfsProviderStarting = false;
+
+      const abnormalExit = !requested && (Boolean(signal) || (typeof code === 'number' && code !== 0));
+      if (abnormalExit && vfsActiveConfig?.virtualFilesEnabled && vfsActiveConfig?.virtualFilesFolder && vfsActiveConfig?.remoteFolderId) {
+        if (runtimeMs > 60_000) vfsProviderRestartAttempts = 0;
+        vfsProviderRestartAttempts = Math.min(vfsProviderRestartAttempts + 1, 6);
+        const delayMs = Math.min(30_000, 1500 * (2 ** vfsProviderRestartAttempts));
+
+        if (vfsProviderRestartTimer) {
+          try { clearTimeout(vfsProviderRestartTimer); } catch {}
+        }
+
+        vfsProviderRestartTimer = setTimeout(() => {
+          vfsProviderRestartTimer = null;
+          configureVfsInfrastructure(vfsActiveConfig).catch(err => {
+            const restartError = String(err?.message || err);
+            pushVfsDebug('warning', 'provider-auto-restart-failed', { error: restartError });
+            addActivity({ level: 'warning', message: `[Cloud Files] Auto-restart failed: ${restartError}` });
+          });
+        }, delayMs);
+
+        pushVfsDebug('info', 'provider-auto-restart-scheduled', {
+          attempt: vfsProviderRestartAttempts,
+          delayMs,
+        });
+        addActivity({ level: 'info', message: `[Cloud Files] Auto-restart scheduled in ${Math.round(delayMs / 1000)}s.` });
+      } else {
+        vfsProviderRestartAttempts = 0;
+        pushVfsDebug('info', 'provider-auto-restart-skipped', {
+          requested,
+          code: code === null || typeof code === 'undefined' ? null : code,
+          signal: signal || null,
+        });
+      }
     });
   } catch (err) {
-    const msg = String(err?.message || err);
-    appendVfsDebugLog('[provider] spawn threw', { message: msg });
-    vfsProviderProcess = null;
     vfsProviderStarting = false;
-    vfsProviderState.starting = false;
+    const msg = String(err?.message || err);
+    pushVfsDebug('warning', 'provider-start-failed', { error: msg });
+    addActivity({ level: 'warning', message: `[Cloud Files] Failed to start provider: ${msg}` });
     vfsProviderState.running = false;
-    vfsProviderState.pid = null;
     vfsProviderState.lastError = msg;
     vfsProviderState.lastExitCode = null;
     vfsProviderState.lastEventAt = Date.now();
-    addActivity({ level: 'warning', message: `[Cloud Files] Failed to start provider: ${msg}` });
     publishVfsStatus();
   }
-}
-
-async function configureVfsInfrastructure(config) {
-  if (process.platform !== 'win32') return;
-
-  const enabled = Boolean(config?.virtualFilesEnabled);
-  if (!enabled) {
-    appendVfsDebugLog('[configure] disabling Cloud Files');
-    vfsActiveConfig = null;
-    await stopVfsProvider();
-    await stopVfsServer();
-    return;
-  }
-
-  if (!config?.virtualFilesFolder) {
-    vfsProviderState.running = false;
-    vfsProviderState.starting = false;
-    vfsProviderState.lastError = 'Cloud Files is enabled but no Cloud Files folder is selected.';
-    vfsProviderState.lastEventAt = Date.now();
-    addActivity({ level: 'warning', message: 'Cloud Files is enabled but no Cloud Files folder is selected.' });
-    publishVfsStatus();
-    return;
-  }
-
-  if (!config?.remoteFolderId) {
-    vfsProviderState.running = false;
-    vfsProviderState.starting = false;
-    vfsProviderState.lastError = 'Cloud Files needs a cloud folder selection first.';
-    vfsProviderState.lastEventAt = Date.now();
-    addActivity({ level: 'warning', message: 'Cloud Files needs a cloud folder selection first.' });
-    publishVfsStatus();
-    return;
-  }
-
-  await ensureDirectoryExists(config.virtualFilesFolder);
-
-  const nextConfig = { ...defaultConfig, ...config };
-  const nextConfigKey = getVfsProviderConfigKey(nextConfig);
-  const sameConfig = vfsProviderProcess && vfsProviderConfigKey === nextConfigKey;
-
-  appendVfsDebugLog('[configure] applying', {
-    sameConfig,
-    nextConfigKey,
-    currentConfigKey: vfsProviderConfigKey,
-    hasProcess: Boolean(vfsProviderProcess),
-    starting: Boolean(vfsProviderStarting),
-  });
-
-  vfsActiveConfig = nextConfig;
-  await startVfsServer();
-
-  if (sameConfig) {
-    publishVfsStatus();
-    return;
-  }
-
-  await stopVfsProvider();
-  vfsProviderConfigKey = nextConfigKey;
-  await startVfsProvider(nextConfig);
 }
 
 const { execFile } = require('node:child_process');
@@ -821,7 +830,7 @@ function getConfigPath() {
 }
 
 function maskSecret(secret) {
-  return secret ? 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢' : '';
+  return secret ? 'Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢' : '';
 }
 
 
@@ -924,10 +933,6 @@ function getCacheRoot() {
 async function ensureDir(dirPath) {
   if (!dirPath) return;
   await fs.mkdir(dirPath, { recursive: true });
-}
-
-async function ensureDirectoryExists(dirPath) {
-  await ensureDir(dirPath);
 }
 
 async function listFilesRecursive(rootDir) {
@@ -1184,7 +1189,7 @@ async function stopAutoSyncInfrastructure() {
     localWatcher.close();
     localWatcher = null;
   }
-  await stopVfsProvider();
+  stopVfsProvider();
   await stopVfsServer();
 }
 
@@ -1197,7 +1202,7 @@ async function triggerAutoSync(reason = 'Changes detected') {
     addActivity({ level: 'info', message: gate.reason });
     return;
   }
-  addActivity({ level: 'info', message: `${reason} â€” starting automatic sync` });
+  addActivity({ level: 'info', message: `${reason} Ã¢â‚¬â€ starting automatic sync` });
   try {
     await performSync(config);
   } catch (error) {
@@ -1617,7 +1622,7 @@ async function performSync(config) {
   const authenticatedConfig = await ensureAuthenticated(config);
   const suppressUploads = Boolean(authenticatedConfig.lastSyncedRemoteFolderId && authenticatedConfig.lastSyncedRemoteFolderId !== authenticatedConfig.remoteFolderId);
   if (suppressUploads && authenticatedConfig.enableUploadSync) {
-    addActivity({ level: 'warning', message: 'Cloud folder changed since last sync â€” uploads are disabled for this run to prevent copying old local data into the new folder.' });
+    addActivity({ level: 'warning', message: 'Cloud folder changed since last sync Ã¢â‚¬â€ uploads are disabled for this run to prevent copying old local data into the new folder.' });
   }
   const effectiveConfig = { ...authenticatedConfig, suppressUploadsThisRun: suppressUploads };
   const persistedStatePayload = await loadPersistedSyncStates(effectiveConfig);
@@ -1626,7 +1631,7 @@ async function performSync(config) {
 
   syncInProgress = true;
   latestSyncResult = { uploaded: [], downloaded: [], warnings: [], conflicts: [], skipped: [], localCount: 0, remoteCount: 0, completedOperations: 0, totalOperations: 0, live: { uploading: 0, downloading: 0, conflicts: 0 } };
-  setStatus('Syncingâ€¦');
+  setStatus('SyncingÃ¢â‚¬Â¦');
   updateProgressBar(0, 1);
   addActivity({ level: 'info', message: 'Sync started' });
   sendLiveUpdate({ pendingOps });
@@ -1745,7 +1750,7 @@ async function performSync(config) {
     });
     syncInProgress = false;
     activeTransfers.clear();
-    sendLiveUpdate({ pendingOps });
+    sendLiveUpdate({ pendingOps: Array.isArray(result.pendingOps) ? result.pendingOps : pendingOps });
     updateProgressBar(-1, 0);
     const summaryParts = [];
     const uploadedCount = Array.isArray(result.uploaded) ? result.uploaded.length : 0;
@@ -1779,7 +1784,7 @@ async function performSync(config) {
   } catch (error) {
     syncInProgress = false;
     activeTransfers.clear();
-    sendLiveUpdate({ pendingOps });
+    sendLiveUpdate({ pendingOps: Array.isArray(result.pendingOps) ? result.pendingOps : pendingOps });
     updateProgressBar(-1, 0);
     setStatus('Sync failed');
     addActivity({ level: 'error', message: `Sync failed: ${error.message}` });
@@ -2358,3 +2363,6 @@ ipcMain.handle('shell:openPath', async (_, targetPath) => {
 });
 
 ;
+
+
+
