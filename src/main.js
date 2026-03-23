@@ -124,7 +124,7 @@ async function handleVfsRequest(req) {
   const id = req?.id ?? null;
   const method = String(req?.method || '');
   const params = req?.params || {};
-  if (!id) return null;
+  if (id === null) return null;
 
   if (method === 'ping') return { id, ok: true, result: 'pong' };
 
