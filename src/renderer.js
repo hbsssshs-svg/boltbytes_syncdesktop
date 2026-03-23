@@ -596,9 +596,8 @@ function renderTransfers() {
     meta.textContent = metaParts.join(' • ') || '';
     li.append(name, meta);
     els.transferList.appendChild(li);
-}
   }
-
+}
 
 function renderActivity() {
   els.activityList.replaceChildren();

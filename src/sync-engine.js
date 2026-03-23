@@ -611,7 +611,7 @@ async function runSync(config, options = {}) {
         }
       } catch {
         await fs.mkdir(destination, { recursive: true });
-        foldersCreated.push(folderPath);
+        foldersCreated.add(folderPath);
         created = true;
         emit({ type: 'activity', level: 'info', action: 'folder', path: folderPath, message: `Created folder ${folderPath}` });
       }
@@ -727,7 +727,6 @@ async function runSync(config, options = {}) {
         }
         live.uploading -= 1;
 
-        live.uploading -= 1;
         syncStateEntries[relativePath] = { state: 'deleted', updatedAt: new Date().toISOString(), local: null, remote: null };
         emitProgress({ action: 'deleted-remote', path: relativePath, message: `Deleted from cloud: ${relativePath}` });
         return;
@@ -834,14 +833,7 @@ async function runSync(config, options = {}) {
           return;
         }
         uploaded.push(relativePath);
-        if (uploadResult?.queued) {
-        live.uploading -= 1;
-        syncStateEntries[relativePath] = { ...(syncStateEntries[relativePath] || {}), state: 'queued', updatedAt: new Date().toISOString() };
-        emitProgress({ action: 'queued-upload', path: relativePath, message: `Queued upload: ${relativePath}` });
-        return;
-      }
-
-      const uploadedEntry = uploadResult?.entry || null;
+        const uploadedEntry = uploadResult?.entry || null;
         const uploadedRemoteState = uploadedEntry ? remoteEntryToState(uploadedEntry) : null;
         syncStateEntries[relativePath] = {
           state: 'synced',
