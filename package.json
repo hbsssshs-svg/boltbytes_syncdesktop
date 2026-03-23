@@ -1,0 +1,40 @@
+{
+  "name": "boltbytes-sync-desktop",
+  "version": "0.2.5",
+  "description": "Electron desktop sync client for BoltBytes with tray status, Windows drive mapping and EXE builds.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/api-client.js && node --check src/sync-engine.js && node --check src/renderer.js && node --check src/conflict-preload.js && node --check src/conflict.js",
+    "dist:win": "npm run builder -- --win nsis",
+    "dist:portable": "npm run builder -- --win portable",
+    "builder": "node scripts/run-builder.js"
+  },
+  "build": {
+    "appId": "com.boltbytes.syncdesktop",
+    "productName": "BoltBytes Desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "README.md"
+    ],
+    "win": {
+      "icon": "src/assets/boltbytes-app.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "installerIcon": "src/assets/boltbytes-app.ico",
+      "uninstallerIcon": "src/assets/boltbytes-app.ico"
+    }
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "author": "Henrik Smed"
+}
