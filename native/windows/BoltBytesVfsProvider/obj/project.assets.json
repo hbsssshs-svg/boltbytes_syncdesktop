@@ -13,11 +13,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\dev\\boltbytes_syncdesktop\\native\\windows\\BoltBytesVfsProvider\\BoltBytesVfsProvider.csproj",
+      "projectUniqueName": "C:\\dev\\boltbytes_syncdesktop_codex\\native\\windows\\BoltBytesVfsProvider\\BoltBytesVfsProvider.csproj",
       "projectName": "BoltBytesVfsProvider",
-      "projectPath": "C:\\dev\\boltbytes_syncdesktop\\native\\windows\\BoltBytesVfsProvider\\BoltBytesVfsProvider.csproj",
+      "projectPath": "C:\\dev\\boltbytes_syncdesktop_codex\\native\\windows\\BoltBytesVfsProvider\\BoltBytesVfsProvider.csproj",
       "packagesPath": "C:\\Users\\Henrik\\.nuget\\packages\\",
-      "outputPath": "C:\\dev\\boltbytes_syncdesktop\\native\\windows\\BoltBytesVfsProvider\\obj\\",
+      "outputPath": "C:\\dev\\boltbytes_syncdesktop_codex\\native\\windows\\BoltBytesVfsProvider\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\Henrik\\AppData\\Roaming\\NuGet\\NuGet.Config"
