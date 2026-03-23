@@ -77,6 +77,17 @@ function createIgnoreMatcher(rulesText) {
     });
   }
 
+  function matchesDirectoryRule(rel, rule) {
+    if (!rule.dirOnly) return false;
+
+    if (rule.rooted || rule.hasSlash) {
+      return rel === rule.cleaned || rel.startsWith(`${rule.cleaned}/`);
+    }
+
+    const segments = rel.split('/').filter(Boolean);
+    return segments.includes(rule.cleaned);
+  }
+
   return (relativePath, isDir = false) => {
     const rel = normalizeRelativePath(relativePath);
     if (!rel) return false;
@@ -86,11 +97,11 @@ function createIgnoreMatcher(rulesText) {
     for (const rule of rules) {
       if (rule.dirOnly && !isDir) {
         // Still allow directory pattern to match descendants.
-        if (!rel.startsWith(`${rule.cleaned}/`)) continue;
+        if (!matchesDirectoryRule(rel, rule)) continue;
       }
 
       const candidate = rule.rooted || rule.hasSlash ? rel : basename;
-      const matched = rule.regex.test(candidate) || (rule.dirOnly && rel.startsWith(`${rule.cleaned}/`));
+      const matched = rule.regex.test(candidate) || matchesDirectoryRule(rel, rule);
       if (!matched) continue;
       ignored = !rule.negated;
     }
@@ -1220,7 +1231,10 @@ if (localFile && !remoteEntry) {
     }
   });
 
-  const reconciledLocalFiles = await walkDirectory(config.localFolder);
+  const reconciledLocalFiles = await walkDirectory(config.localFolder, {
+    ignore: ignoreMatcher,
+    isExcluded: (rel) => isExcludedFolder(rel),
+  });
   const reconciledRemoteTree = await client.listRemoteTree({ parentId: selectedParentId });
   const reconciledRemoteMap = new Map(reconciledRemoteTree.files.map(entry => [normalizeRemoteRelativePath(entry.relativePath || entry.relative_path || entry.name), entry]));
   for (const localFile of reconciledLocalFiles) {
