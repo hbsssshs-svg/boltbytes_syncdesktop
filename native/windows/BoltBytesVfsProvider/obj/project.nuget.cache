@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "Sc61hpRFop8=",
+  "dgSpecHash": "4RhHI+3klTc=",
   "success": true,
-  "projectFilePath": "C:\\dev\\boltbytes_syncdesktop\\native\\windows\\BoltBytesVfsProvider\\BoltBytesVfsProvider.csproj",
+  "projectFilePath": "C:\\dev\\boltbytes_syncdesktop_codex\\native\\windows\\BoltBytesVfsProvider\\BoltBytesVfsProvider.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Henrik\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.19041.56\\microsoft.windows.sdk.net.ref.10.0.19041.56.nupkg.sha512"
   ],
