@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+      <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BoltBytes Sync Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="window">
+      <header class="topbar drag-region" aria-label="Top bar">
+        <div class="topbar-left no-drag">
+          <button id="accountMenuButton" class="account-button" type="button" aria-haspopup="menu" aria-expanded="false">
+            <span id="accountAvatar" class="avatar">B</span>
+            <span class="account-meta">
+              <span id="accountDisplayName" class="account-name">Not signed in</span>
+              <span id="accountServer" class="account-server">boltbytes.com</span>
+            </span>
+            <span class="chevron" aria-hidden="true">▾</span>
+          </button>
+
+          <div id="accountMenu" class="menu" role="menu" hidden>
+            <button id="menuSettings" class="menu-item" type="button" role="menuitem">Settings</button>
+            <button id="menuAddAccount" class="menu-item" type="button" role="menuitem">Add account</button>
+            <div class="menu-sep" role="separator"></div>
+            <button id="menuExit" class="menu-item danger" type="button" role="menuitem">Quit</button>
+          </div>
+        </div>
+
+        <div class="topbar-right no-drag">
+          <button id="openLocalFolderButton" class="icon-button" type="button" title="Open local folder">📁</button>
+          <button id="openSettingsButton" class="icon-button" type="button" title="Open settings">⚙</button>
+        </div>
+      </header>
+
+      <main class="content no-drag">
+        <section class="status-row" aria-label="Sync status">
+          <div class="status-pill">
+            <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+            <strong id="statusHeadline">Loading…</strong>
+            <span id="statusText" class="muted">Initializing…</span>
+          </div>
+
+          <div class="status-meta">
+            <div class="meta-item">
+              <span class="meta-label">Last sync</span>
+              <strong id="lastSyncTime">—</strong>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Cloud folder</span>
+              <strong id="lastRemoteFolder">—</strong>
+            </div>
+          </div>
+
+          <div class="button-row compact">
+            <button id="pauseSyncButton" class="ghost-button" type="button">Pause sync</button>
+            <button id="syncNowButton" class="primary-button" type="button">Sync now</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <header class="card-header">
+            <h2 class="card-title">Activity</h2>
+            <button id="clearActivityButton" class="ghost-button" type="button">Clear</button>
+          </header>
+          <div id="transferSummary" class="transfer-summary" hidden>
+            <div class="transfer-metrics">
+              <span id="transferCounts" class="muted">—</span>
+              <span id="pendingOpsLabel" class="muted"></span>
+            </div>
+            <ul id="transferList" class="transfer-list" aria-label="Active transfers"></ul>
+          </div>
+          <ul id="activityList" class="activity-list" aria-label="Activity feed"></ul>
+        </section>
+      </main>
+
+      <!-- Settings modal (Nextcloud-inspired) -->
+      <div id="settingsModal" class="modal" aria-hidden="true">
+        <div class="modal-backdrop" data-close="settings"></div>
+        <section class="modal-sheet" role="dialog" aria-modal="true" aria-label="Settings">
+          <header class="modal-header">
+            <strong>BoltBytes Settings</strong>
+            <button id="settingsCloseButton" class="icon-button" type="button" aria-label="Close">✕</button>
+          </header>
+
+          <div class="settings-layout">
+            <aside class="settings-sidebar">
+              <div class="settings-account">
+                <div id="settingsAvatar" class="avatar large">B</div>
+                <div class="settings-account-meta">
+                  <strong id="settingsName">Not signed in</strong>
+                  <span id="settingsServer">boltbytes.com</span>
+                </div>
+              </div>
+
+              <div class="settings-connection">
+                <div class="connection-row">
+                  <span class="lock-icon" aria-hidden="true">🔒</span>
+                  <span id="connectionStatusText">Not connected.</span>
+                </div>
+</div>
+
+              <div class="settings-sidebar-meta">
+                <div class="meta-item">
+                  <span class="meta-label">Storage</span>
+                  <strong id="storageUsed">—</strong>
+                </div>
+              </div>
+            </aside>
+
+            <div class="settings-main">
+              <div class="tabs" role="tablist" aria-label="Settings tabs">
+                <button class="tab-button active" data-tab="sync" type="button" role="tab" aria-selected="true">Sync</button>
+                <button class="tab-button" data-tab="account" type="button" role="tab" aria-selected="false">Account</button>
+                <button class="tab-button" data-tab="general" type="button" role="tab" aria-selected="false">General</button>
+                <button class="tab-button" data-tab="trash" type="button" role="tab" aria-selected="false">Trash</button>
+              </div>
+
+              <div class="tab-panels">
+                <div class="tab-panel active" id="tab-sync" role="tabpanel">
+                  <div class="form-grid">
+                    <label class="field">
+                      <span class="field-label">Local sync folder</span>
+                      <div class="field-row">
+                        <input id="localFolder" class="text-input" type="text" placeholder="Choose a local folder" readonly />
+                        <button id="pickLocalFolderButton" class="ghost-button" type="button">Choose…</button>
+                      </div>
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">Cloud folder</span>
+                      <div class="field-row">
+                        <div class="dropdown" id="remoteFolderDropdown">
+                          <button id="remoteFolderTrigger" class="dropdown-trigger" type="button" aria-haspopup="listbox" aria-expanded="false">
+                            No cloud folders loaded
+                          </button>
+                          <div id="remoteFolderMenu" class="dropdown-menu" role="listbox" hidden></div>
+                        </div>
+                        <button id="browseRemoteFoldersButton" class="ghost-button" type="button">Browse…</button>
+                        <button id="refreshRemoteFoldersButton" class="ghost-button" type="button">Refresh</button>
+                      </div>
+                      <span id="remoteFolderSummary" class="helper muted">No cloud folders loaded yet.</span>
+                    </label>
+
+
+                    <div class="panel-card">
+                      <div class="panel-header">
+                        <strong>Selective Sync</strong>
+                      </div>
+                      <p id="selectiveSyncSummary" class="helper muted">Syncing all folders.</p>
+                      <div class="button-row">
+                        <button id="openSelectiveSyncButton" class="ghost-button" type="button">Choose folders…</button>
+                        <button id="clearSelectiveSyncButton" class="ghost-button" type="button">Sync all</button>
+                      </div>
+                    </div>
+
+                    <label class="field inline">
+                      <input id="enableDownloadSync" type="checkbox" />
+                      <span>Enable cloud to local downloads</span>
+                    </label>
+
+                    <label class="field inline">
+                      <input id="enableUploadSync" type="checkbox" />
+                      <span>Enable local to cloud uploads</span>
+                    </label>
+
+                    <label class="field inline">
+                      <input id="autoSyncEnabled" type="checkbox" />
+                      <span>Auto sync enabled</span>
+                    </label>
+
+
+                    <label class="field inline">
+                      <input id="wifiOnly" type="checkbox" />
+                      <span>Sync only on Wi-Fi</span>
+                    </label>
+                    <span class="helper muted">When enabled, BoltBytes will sync only when connected to Wi-Fi.</span>
+
+                    <div class="panel-card" id="cloudFilesPanel">
+                      <div class="panel-header">
+                        <strong>Cloud Files (Windows)</strong>
+                      </div>
+                      <label class="field inline">
+                        <input id="virtualFilesEnabled" type="checkbox" />
+                        <span>Enable Cloud Files (online-only placeholders)</span>
+                      </label>
+                      <label class="field">
+                        <span class="field-label">Cloud Files folder</span>
+                        <div class="field-row">
+                          <input id="virtualFilesFolder" class="text-input" type="text" placeholder="Choose a folder for placeholders" readonly />
+                          <button id="pickVirtualFilesFolderButton" class="ghost-button" type="button">Choose…</button>
+                        </div>
+                        
+                        <label class="field inline">
+                          <input id="virtualFilesFolderUnlocked" type="checkbox" />
+                          <span>Advanced: allow changing Cloud Files folder</span>
+                        </label>
+                        <span class="helper muted">Windows only. Recommended default is used unless unlocked. Open this folder in File Explorer to use “Always keep on this device” / “Free up space”.</span>
+                      </label>
+                      <div class="button-row">
+                        <button id="openVirtualFilesFolderButton" class="ghost-button" type="button">Open folder</button>
+                      </div>
+                    </div>
+
+                    <div class="field">
+                      <span class="field-label">Provider status</span>
+                      <div id="vfsProviderStatusText" class="helper muted">Unknown</div>
+                      <div class="helper muted">If you run this via npm (development), you must install .NET 8 SDK or provide a built BoltBytesVfsProvider.exe via BOLTBYTES_VFS_PROVIDER_PATH. After enabling, you may need to restart File Explorer to see the navigation entry and status icons.</div>
+                    </div>
+
+                    <label class="field">
+                      <span class="field-label">Poll interval (seconds)</span>
+                      <input id="pollIntervalSeconds" class="text-input" type="number" min="10" step="10" />
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">Sync concurrency</span>
+                      <input id="syncConcurrency" class="text-input" type="number" min="1" max="10" step="1" />
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">Conflict strategy</span>
+                      <select id="conflictStrategy" class="select-input">
+                        <option value="ask">Ask each time</option>
+                        <option value="keep-both">Keep both</option>
+                        <option value="prefer-local">Prefer local</option>
+                        <option value="prefer-remote">Prefer remote</option>
+                      </select>
+                    </label>
+
+                    <label class="field inline">
+                      <input id="moveLocalDeletesToTrash" type="checkbox" />
+                      <span>Move locally deleted files to Trash</span>
+                    </label>
+                    <span class="helper muted">When the client removes a local file (for example because it was deleted in the cloud), it will be moved to the system Trash/Recycle Bin.</span>
+
+
+
+                    <div class="panel-card">
+                      <div class="panel-header">
+                        <strong>Ignore rules</strong>
+                      </div>
+
+                      <label class="field">
+                        <span class="field-label">Ignored paths (one per line)</span>
+                        <textarea id="ignoreRulesText" class="text-area" rows="6" placeholder="*.tmp"></textarea>
+                        <span class="helper muted">Supports *, ?, and ** wildcards. Prefix a rule with ! to un-ignore.</span>
+                      </label>
+
+                      <div class="button-row">
+                        <button id="ignoreInsertPresetsButton" class="ghost-button" type="button">Insert presets</button>
+                        <button id="ignoreClearButton" class="ghost-button" type="button">Clear</button>
+                      </div>
+                    </div>
+
+                    <div class="panel-card">
+                      <div class="panel-header">
+                        <strong>Explorer shortcut</strong>
+                      </div>
+
+                      <label class="field">
+                        <span class="field-label">Explorer shortcut name</span>
+                        <input id="explorerShortcutName" class="text-input" type="text" placeholder="BoltBytes Sync" />
+                      </label>
+
+                      <label class="field inline">
+                        <input id="autoCreateExplorerShortcut" type="checkbox" />
+                        <span>Create shortcut automatically</span>
+                      </label>
+
+                      <div class="button-row">
+                        <button id="createShortcutButton" class="ghost-button" type="button">Create shortcut</button>
+                        <button id="removeShortcutButton" class="ghost-button" type="button">Remove shortcut</button>
+                      </div>
+
+                      <p id="shortcutStatus" class="helper muted">Checking shortcut status…</p>
+                    </div>
+
+                    <div class="panel-card">
+                      <div class="panel-header">
+                        <strong>Debug</strong>
+                      </div>
+
+                      <label class="field inline">
+                        <input id="debugApi" type="checkbox" />
+                        <span>Debug API requests (shows request/response details)</span>
+                      </label>
+
+                      <div class="button-row">
+                        <button id="clearApiLogButton" class="ghost-button" type="button">Clear log</button>
+                      </div>
+
+                      <pre id="apiDebugLog" class="log-box" aria-label="API debug log"></pre>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="tab-panel" id="tab-account" role="tabpanel">
+                  <div class="form-grid">                    <label class="field">
+                      <span class="field-label">Email</span>
+                      <input id="email" class="text-input" type="email" autocomplete="username" />
+                    </label>
+
+                    <label class="field">
+                      <span class="field-label">Password</span>
+                      <input id="password" class="text-input" type="password" autocomplete="current-password" />
+                    </label>
+
+                    <label class="field inline">
+                      <input id="rememberPassword" type="checkbox" />
+                      <span>Remember password</span>
+                    </label>
+
+                    <div class="button-row">
+                      <button id="loginButton" class="primary-button" type="button">Sign in</button>
+                      <button id="logoutButton" class="ghost-button" type="button">Sign out</button>
+                    </div>
+
+                    <label class="field">
+                      <span class="field-label">Token (masked)</span>
+                      <input id="tokenMasked" class="text-input" type="text" readonly />
+                    </label>
+
+
+                    <label class="field">
+                      <span class="field-label">Bearer token (optional)</span>
+                      <input id="manualToken" class="text-input" type="text" placeholder="26|..." />
+                      <span class="helper muted">For testing: paste an existing bearer token and click “Use token”.</span>
+                    </label>
+
+                    <div class="button-row">
+                      <button id="useTokenButton" class="ghost-button" type="button">Use token</button>
+                    </div>
+                    <p id="accountError" class="helper danger" hidden></p>
+                  </div>
+                </div>
+
+                <div class="tab-panel" id="tab-general" role="tabpanel">
+                  <div class="form-grid">
+                    <label class="field inline">
+                      <input id="launchOnStartup" type="checkbox" />
+                      <span>Launch on startup</span>
+                    </label>
+
+                    <label class="field inline">
+                      <input id="showNotifications" type="checkbox" />
+                      <span>Show notifications</span>
+                    </label>
+
+
+                    <div class="panel-card">
+                      <div class="panel-header">
+                        <strong>Cache</strong>
+                      </div>
+
+                      <label class="field inline">
+                        <input id="cacheAutoClean" type="checkbox" />
+                        <span>Auto-clean cache</span>
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Max cache age (days)</span>
+                        <input id="cacheMaxAgeDays" class="text-input" type="number" min="1" step="1" />
+                        <span class="helper muted">Files older than this may be deleted automatically and will be downloaded again if needed.</span>
+                      </label>
+
+                      <label class="field">
+                        <span class="field-label">Max cache size (MB)</span>
+                        <input id="cacheMaxSizeMb" class="text-input" type="number" min="50" step="50" />
+                        <span class="helper muted">When the cache is larger than this, the oldest files are removed first.</span>
+                      </label>
+
+                      <div class="button-row">
+                        <button id="openCacheFolderButton" class="ghost-button" type="button">Open cache folder</button>
+                        <button id="runCacheCleanupButton" class="ghost-button" type="button">Clean now</button>
+                      </div>
+                      <div class="muted small" id="cacheInfoText"></div>
+                    </div>
+
+                    <div class="panel-card">
+                      <div class="panel-header">
+                        <strong>Self-test</strong>
+                      </div>
+                      <div class="button-row">
+                        <button id="apiSelfTestButton" class="ghost-button" type="button">Test API</button>
+                      </div>
+                      <pre id="apiSelfTestOutput" class="log-box"></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+
+                <div class="tab-panel" id="tab-trash" role="tabpanel">
+                  <div class="form-grid">
+                    <div class="panel-card">
+                      <div class="panel-header">
+                        <strong>Trash</strong>
+                        <span class="muted" id="trashCount">—</span>
+                      </div>
+
+                      <div class="trash-toolbar">
+                        <button id="trashRefreshButton" class="ghost-button" type="button">Refresh</button>
+                        <button id="trashRestoreButton" class="ghost-button" type="button" disabled>Restore</button>
+                        <button id="trashDeleteButton" class="danger-button" type="button" disabled>Delete permanently</button>
+                        <button id="trashEmptyButton" class="danger-button" type="button" disabled>Empty trash</button>
+                      </div>
+
+                      <label class="field">
+                        <span class="field-label">Search</span>
+                        <input id="trashSearch" class="text-input" type="text" placeholder="Filter by name…" />
+                      </label>
+
+                      <div id="trashLoading" class="helper muted" hidden>Loading trash…</div>
+                      <p id="trashError" class="helper danger" hidden></p>
+
+                      <div class="trash-list" role="list" aria-label="Trash items">
+                        <div class="trash-list-head">
+                          <span></span>
+                          <span>Name</span>
+                          <span>Type</span>
+                          <span>Deleted</span>
+                        </div>
+                        <div id="trashListBody" class="trash-list-body"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+            </div>
+          </div>
+        </section>
+      </div>
+
+
+<!-- Cloud folder browser (breadcrumb navigation) -->
+<div id="folderBrowserModal" class="modal" aria-hidden="true">
+  <div class="modal-backdrop" data-close="folderBrowser"></div>
+  <section class="modal-sheet folder-browser-sheet" role="dialog" aria-modal="true" aria-label="Choose a cloud folder">
+    <header class="modal-header">
+      <strong>Choose a cloud folder</strong>
+      <button id="folderBrowserCloseButton" class="icon-button" type="button" aria-label="Close">✕</button>
+    </header>
+
+    <div class="folder-browser-body">
+      <nav id="folderBreadcrumb" class="breadcrumb" aria-label="Folder path"></nav>
+
+      <div class="folder-browser-panel">
+        <div id="folderBrowserLoading" class="helper muted" hidden>Loading folders…</div>
+        <p id="folderBrowserError" class="helper danger" hidden></p>
+        <ul id="folderBrowserList" class="folder-list" aria-label="Folders"></ul>
+      </div>
+
+      <div class="folder-create-row">
+        <input id="folderBrowserNewName" class="text-input" type="text" placeholder="New folder name" />
+        <button id="folderBrowserCreateButton" class="ghost-button" type="button">Create</button>
+      </div>
+      <div id="folderBrowserCreateStatus" class="helper muted" hidden></div>
+
+      <div class="button-row">
+        <button id="folderBrowserCancelButton" class="ghost-button" type="button">Cancel</button>
+        <button id="folderBrowserSelectButton" class="primary-button" type="button">Select this folder</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+      <!-- First-time wizard (hard gate) -->
+      <div id="wizardModal" class="modal" aria-hidden="true">
+        <div class="modal-backdrop"></div>
+        <section class="modal-sheet wizard-sheet" role="dialog" aria-modal="true" aria-label="First-time setup">
+          <header class="modal-header">
+            <strong>Sign in to get started</strong>
+          </header>
+
+          <div class="wizard-body">
+            <p class="muted">You need to be signed in to use this app.</p>
+
+            <label class="field">
+              <span class="field-label">Email</span>
+              <input id="wizardEmail" class="text-input" type="email" autocomplete="username" />
+            </label>
+
+            <label class="field">
+              <span class="field-label">Password</span>
+              <input id="wizardPassword" class="text-input" type="password" autocomplete="current-password" />
+            </label>
+
+            <label class="field inline">
+              <input id="wizardRememberPassword" type="checkbox" />
+              <span>Remember password</span>
+            </label>
+
+            <div class="button-row">
+              <button id="wizardLoginButton" class="primary-button" type="button">Sign in</button>
+            </div>
+
+
+            <div class="panel-card">
+              <div class="panel-header">
+                <strong>Or use a bearer token</strong>
+              </div>
+
+              <label class="field">
+                <span class="field-label">Bearer token</span>
+                <input id="wizardToken" class="text-input" type="text" placeholder="26|..." />
+              </label>
+
+              <div class="button-row">
+                <button id="wizardUseTokenButton" class="ghost-button" type="button">Use token</button>
+              </div>
+            </div>
+            <p id="wizardError" class="helper danger" hidden></p>
+          </div>
+        </section>
+      </div>
+
+    </div>
+<!-- Selective Sync modal -->
+<div id="selectiveSyncModal" class="modal" aria-hidden="true">
+  <div class="modal-backdrop" data-close="selectiveSync"></div>
+  <section class="modal-sheet" role="dialog" aria-modal="true" aria-label="Selective Sync">
+    <header class="modal-header">
+      <strong>Selective Sync</strong>
+      <button id="selectiveSyncCloseButton" class="icon-button" type="button" aria-label="Close">✕</button>
+    </header>
+
+    <div class="form-grid">
+      <label class="field">
+        <span class="field-label">Search folders</span>
+        <input id="selectiveSyncSearch" class="text-input" type="text" placeholder="Filter folders…" />
+      </label>
+
+      <div class="selective-sync-toolbar">
+        <button id="selectiveSyncSelectAllButton" class="ghost-button" type="button">Select all</button>
+        <button id="selectiveSyncSelectNoneButton" class="ghost-button" type="button">Select none</button>
+      </div>
+
+      <div id="selectiveSyncLoading" class="helper muted" hidden>Loading folders…</div>
+      <p id="selectiveSyncError" class="helper danger" hidden></p>
+
+      <div id="selectiveSyncList" class="selective-sync-list" role="list" aria-label="Folder list"></div>
+
+      <div class="button-row">
+        <button id="selectiveSyncCancelButton" class="ghost-button" type="button">Cancel</button>
+        <button id="selectiveSyncSaveButton" class="primary-button" type="button">Save</button>
+      </div>
+    </div>
+  </section>
+</div>
+    <script src="./renderer.js" defer></script>
+  </body>
+</html>

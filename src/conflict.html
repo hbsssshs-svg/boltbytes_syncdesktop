@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'">
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Conflict</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <style>
+    .conflict-window { padding: 14px; display: flex; flex-direction: column; height: 100%; gap: 12px; }
+    .conflict-header { display: flex; align-items: center; gap: 10px; }
+    .conflict-header img { width: 26px; height: 26px; }
+    .conflict-title { font-weight: 800; font-size: 16px; }
+    .conflict-path { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 660px; }
+    .conflict-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .conflict-kv { display: grid; grid-template-columns: 120px 1fr; gap: 6px 10px; font-size: 12px; }
+    .conflict-kv div:nth-child(odd) { color: var(--muted); }
+    .conflict-badge { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+    .conflict-badge strong { color: var(--text); }
+    .conflict-footer { margin-top: auto; display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+    .conflict-left { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .conflict-right { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+    .btn { padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.14); color: var(--text); cursor: pointer; }
+    .btn:focus { outline: none; box-shadow: var(--focus); }
+    .btn.primary { background: var(--blue); border-color: rgba(0,0,0,0.25); }
+    .btn.danger { background: rgba(255, 107, 107, 0.14); border-color: rgba(255, 107, 107, 0.28); }
+    .btn.secondary { background: rgba(255,255,255,0.08); }
+    .btn.small { padding: 6px 10px; border-radius: 9px; font-size: 12px; }
+    .btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+    .note { font-size: 12px; color: var(--muted); }
+    .apply-all { display: inline-flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); user-select: none; }
+    .apply-all input { width: 14px; height: 14px; }
+    .panel-right { display: inline-flex; gap: 10px; align-items: center; }
+  </style>
+</head>
+<body>
+  <div class="conflict-window">
+    <div class="conflict-header">
+      <img src="./assets/boltbytes-icon.svg" alt="BoltBytes" />
+      <div>
+        <div class="conflict-title">Conflict detected</div>
+        <div id="conflictSubtitle" class="conflict-path">Loading…</div>
+      </div>
+    </div>
+
+    <div id="conflictHint" class="note"></div>
+
+    <div id="conflictGrid" class="conflict-grid">
+      <div class="panel-card">
+        <div class="panel-header">
+          <strong>Local</strong>
+          <div class="panel-right">
+            <button id="btnOpenLocal" class="btn small secondary">Open</button>
+            <span id="localBadge" class="conflict-badge"></span>
+          </div>
+        </div>
+        <div id="localMeta" class="conflict-kv"></div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-header">
+          <strong>Cloud</strong>
+          <div class="panel-right">
+            <button id="btnOpenRemote" class="btn small secondary">Open</button>
+            <span id="remoteBadge" class="conflict-badge"></span>
+          </div>
+        </div>
+        <div id="remoteMeta" class="conflict-kv"></div>
+      </div>
+    </div>
+
+    <div class="conflict-footer">
+      <div class="conflict-left">
+        <button id="btnOpenBoth" class="btn secondary">Open both</button>
+        <label class="apply-all"><input id="applyToAll" type="checkbox" /> Apply to all conflicts like this (this run)</label>
+      </div>
+
+      <div class="conflict-right">
+        <button id="btnCancel" class="btn secondary">Skip</button>
+        <button id="btnA" class="btn">Action A</button>
+        <button id="btnB" class="btn">Action B</button>
+        <button id="btnC" class="btn primary">Action C</button>
+      </div>
+    </div>
+  </div>
+    <script src="./conflict.js" defer></script>
+  </body>
+</html>
